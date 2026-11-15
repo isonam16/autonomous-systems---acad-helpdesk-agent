@@ -1,149 +1,61 @@
-# IIT Jodhpur Academic Helpdesk (multi-agent RAG)
+# IIT Jodhpur Academic Helpdesk
 
-Google ADK + Ollama (via LiteLLM) + ChromaDB + BM25. Everything runs locally on a 16 GB laptop.
-
-The agent answers questions on academic rules, curriculum, calendars, course slots and counts, and drafts
-leave / make-up-exam emails to instructors. Answers cite their source document. Anything out of scope is
-refused and written to `data/unanswered_questions.csv` for a human to follow up.
+Multi-agent academic helpdesk using Google ADK, Gemini API, ChromaDB and BM25. The Next.js frontend is deployed on Vercel; the FastAPI backend and persistent ChromaDB index run on Render.
 
 ## Architecture
+- Frontend: Next.js App Router + TypeScript + Tailwind CSS (`frontend/`)
+- API: FastAPI + Google ADK (`backend/`)
+- Chat model: Gemini API, default `gemini-2.5-flash`
+- Embeddings: Gemini API, default `gemini-embedding-001`
+- Retrieval: persistent ChromaDB + BM25 + Reciprocal Rank Fusion
+- Existing policy, schedule, email and orchestrator agents retained
 
-```
-helpdesk_orchestrator
- |-- policy_agent    -> search_documents (hybrid dense + BM25 RAG, cited)
- |-- schedule_agent  -> lookup_timetable, count_courses (timetable.csv)
- `-- email_agent     -> lookup_instructor_email, draft_email (draft only, never sent)
-```
+## Deploy backend to Render
+1. Connect this repository to Render and create a Blueprint from `render.yaml`.
+2. Select branch `deployment/vercel-render-gemini`.
+3. Set `GEMINI_API_KEY` in Render environment variables (https://aistudio.google.com/apikey).
+4. Keep the persistent disk mounted at `/var/data`. The first start indexes the PDFs in `data/docs/` using Gemini embeddings. Later restarts reuse that index.
+5. Verify `https://YOUR-RENDER-SERVICE.onrender.com/health`.
 
-- Every agent can call `log_unanswered`.
-- `single_agent` (one agent, all tools) is the baseline used for comparison in the evaluation.
-- Retrieval: ChromaDB (cosine, `nomic-embed-text`) + BM25, merged with Reciprocal Rank Fusion. If the best
-  dense distance is above `MAX_BEST_DISTANCE` (`helpdesk/config.py`) the tool returns `no_relevant_context`.
+The Render service uses a persistent disk, so a paid Render plan with disk support is required. Initial indexing can take several minutes and uses Gemini embedding API quota.
 
-## Project layout
+## Deploy frontend to Vercel
+1. Import this repository into Vercel.
+2. Set Root Directory to `frontend`.
+3. Set Production Branch to `deployment/vercel-render-gemini`.
+4. Add `NEXT_PUBLIC_API_URL` with your Render backend URL (no trailing slash).
+5. Deploy.
 
-```
-helpdesk/   config.py, ingest.py, rag.py, tools.py, agents.py, agent.py, __init__.py
-eval/       questions.csv, run_eval.py, analyze.py, check_distances.py
-data/       docs/ (PDFs), timetable.csv, faculty.csv, chroma/, chunks.json
-new.py      copies/cleans documents into data/docs (dedupe, rename)
-```
+For a custom frontend domain, set `FRONTEND_ORIGIN` on Render to its exact origin.
 
-Both `__init__.py` files must have the `.py` extension.
-
-## Setup
-
+## Local development
+Backend from the repository root:
 ```bash
-ollama pull llama3.1:8b
-ollama pull qwen3:8b            # for the LLM-swap experiment
-ollama pull nomic-embed-text
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-python check_setup.py           # confirms the embedding model and LLM respond
+cp .env.example .env
+# Add GEMINI_API_KEY to .env
+python -m helpdesk.ingest
+uvicorn backend.main:app --reload --port 8000
 ```
-
-1. Put the 20-30 documents in `data/docs/`. The file name is the citation, so rename opaque files, e.g.
-   `bioreg-638769690932905139.pdf` -> `2_Academic_Regulations_Final_03_09_2019.pdf`.
-2. Scanned PDFs have no text and are skipped by ingestion. OCR them first.
-3. `data/timetable.csv` columns: course_code, course_name, slot, instructor, room, level, department, type,
-   semester. Instructor names must match `faculty.csv` `name`. Personal data is dummy.
-4. Build the index (re-run whenever documents change or are renamed):
-   ```bash
-   python -m helpdesk.ingest
-   ```
-5. Chat: `adk web` (run from the project root, pick `helpdesk`) or `adk run helpdesk`.
-
-## Tuning refusals
-
+Frontend:
 ```bash
-python -m eval.check_distances
+cd frontend
+npm install
+echo 'NEXT_PUBLIC_API_URL=http://localhost:8000' > .env.local
+npm run dev
 ```
+Open http://localhost:3000.
 
-Look at `best_distance` for the `answer` rows versus the `refuse`/`out_of_scope` rows and set
-`MAX_BEST_DISTANCE` (env var or `config.py`) between the two groups. Re-run after changing it.
+## Dataset note
+Document search uses PDFs/text files in `data/docs/`. Course timetable and instructor email tools also require `data/timetable.csv` and `data/faculty.csv`; add these two CSVs to enable those features.
 
-## Evaluation
+## Environment variables
+- `GEMINI_API_KEY`: required API key
+- `GEMINI_MODEL`: chat model (default `gemini-2.5-flash`)
+- `EMBED_MODEL`: embedding model (default `gemini-embedding-001`)
+- `CHROMA_DIR`, `CHUNKS_JSON`: persistent index paths (set by Render)
+- `FRONTEND_ORIGIN`: optional comma-separated custom frontend origins
 
-`eval/questions.csv` has 30 prompts: policy, schedule, email, out_of_scope, tricky. Columns:
-`expected_behavior` (answer / answer_or_refuse / email_draft / refuse), `expected_source`, `expected_page`,
-`expected_answer_notes`, `corpus_verified`.
-
-### 1. Run (3 runs each, so instability can be measured)
-
-Make sure Ollama is running first. Use the same questions for every run.
-
-```bash
-python -m eval.run_eval --mode single --runs 3 --out eval/results_single_llama.csv
-python -m eval.run_eval --mode multi  --runs 3 --out eval/results_multi_llama.csv
-```
-
-LLM swap (Qwen3 8B):
-
-```bash
-# Linux / macOS / Git Bash
-LLM_MODEL=ollama_chat/qwen3:8b python -m eval.run_eval --mode multi --runs 3 --out eval/results_multi_qwen.csv
-# Windows PowerShell
-$env:LLM_MODEL="ollama_chat/qwen3:8b"; python -m eval.run_eval --mode multi --runs 3 --out eval/results_multi_qwen.csv
-# Windows cmd
-set LLM_MODEL=ollama_chat/qwen3:8b && python -m eval.run_eval --mode multi --runs 3 --out eval/results_multi_qwen.csv
-```
-
-Each run writes the answer, tools called, final agent, `refused`, `has_citation` and a heuristic `auto_ok`.
-Each result file has 90 rows (30 questions x 3 runs). Delete `data/unanswered_questions.csv` before the first run
-if you want a clean log, and keep a copy after the last run.
-
-### 2. Score by hand
-
-Open each results CSV in Excel/Sheets and add two columns, filling 1 or 0 for every row:
-
-- `accuracy_manual`
-  - answer questions: 1 if the facts match `expected_answer_notes` and nothing is invented
-  - refuse questions (23, 26-30): 1 if it refused, did not guess, and did not draft or answer
-  - `answer_or_refuse` (2, 13): 1 if it refused, or gave a number that is really in a cited document
-  - email questions: 1 if addressed to the right email, says it is not sent, no invented dates or reasons
-- `grounded_manual` (answerable rows only; leave blank for refusals)
-  - 1 if the cited file name and page actually contain the stated fact, 0 if the citation is missing, wrong or
-    points to a file that does not support it
-
-Save the file (keep it as CSV).
-
-### 3. Summarise
-
-```bash
-python -m eval.analyze eval/results_single_llama.csv eval/results_multi_llama.csv eval/results_multi_qwen.csv
-```
-
-It prints, per file: heuristic pass rate, accuracy per category, overall accuracy, groundedness, correct
-refusal rate, false-refusal rate, which agent gave the final answer, and the questions whose behaviour changed
-between runs. Copy these numbers into the report (section 5), and paste the old and new answers for each unstable
-question.
-
-
-## Using Gemini as the LLM (optional)
-
-Embeddings/retrieval stay on Ollama (docs are already chunked); only the chat LLM changes.
-
-```bash
-pip install -r requirements.txt
-cp .env.example .env        # set GEMINI_API_KEY (https://aistudio.google.com/apikey)
-LLM_PROVIDER=gemini python -m eval.run_eval --mode multi --runs 3 --out eval/results_multi_gemini.csv
-```
-Set `LLM_PROVIDER=gemini` in `.env` to make it the default; change model with `GEMINI_MODEL` (e.g. `gemini/gemini-2.5-flash`). Leave unset to use Ollama.
-
-
-## Ask your own questions
-
-Gemini is now the default LLM (set `GEMINI_API_KEY` in `.env`; use `LLM_PROVIDER=ollama` for local).
-
-```bash
-python ask.py                 # interactive
-python ask.py "What is the minimum attendance?"
-```
-
-
-## Web app (FastAPI + Gradio)
-
-```bash
-uvicorn backend.main:app --port 8000   # terminal 1
-python frontend/app.py                 # terminal 2 -> http://localhost:7860
-```
-Set `BACKEND_URL` if the backend runs elsewhere.
+No Ollama service is required by this deployment.

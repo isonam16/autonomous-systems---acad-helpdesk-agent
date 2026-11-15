@@ -1,6 +1,6 @@
 google-adk
+google-genai
 litellm
-ollama
 chromadb
 rank_bm25
 pymupdf
@@ -10,7 +10,5 @@ pandas
 loguru
 mcp
 python-dotenv
-
 fastapi
 uvicorn
-gradio

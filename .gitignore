@@ -1,2 +1,14 @@
-
 .env
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+node_modules/
+.next/
+out/
+.vercel/
+.env.local
+.env.*.local
+data/chroma/
+data/unanswered_questions.csv
