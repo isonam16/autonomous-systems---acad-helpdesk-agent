@@ -34,7 +34,7 @@ def retrieve(query: str, top_k: int = C.TOP_K, pool: int = 15) -> dict:
     chunks, bm25, col = _load()
     by_id = {c["id"]: c for c in chunks}
 
-    dense = col.query(query_embeddings=embed([query]), n_results=pool)
+    dense = col.query(query_embeddings=embed([query], query=True), n_results=pool)
     dense_ids = dense["ids"][0]
     best_distance = dense["distances"][0][0] if dense["distances"][0] else 1.0
 

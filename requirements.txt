@@ -1,6 +1,6 @@
 google-adk
 litellm
-ollama
+
 chromadb
 rank_bm25
 pymupdf
@@ -14,3 +14,4 @@ python-dotenv
 fastapi
 uvicorn
 gradio
+fastembed

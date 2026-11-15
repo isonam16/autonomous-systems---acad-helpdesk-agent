@@ -52,10 +52,11 @@ def count_courses(department: str, level: int, course_type: str = "") -> dict:
         course_type: Optional type filter, e.g. 'Elective'. Empty string = no filter.
     """
     df = pd.read_csv(C.TIMETABLE_CSV, dtype=str).fillna("")
-    m = df[df["department"].str.contains(department, case=False, regex=False)]
-    m = m[m["level"].astype(int) == int(level)]
+    m = df[df["department"].str.contains(department, case=False, regex=False)
+           | (df["department_code"].str.upper() == department.strip().upper())]
+    m = m[pd.to_numeric(m["level"], errors="coerce") == int(level)]
     if course_type:
-        m = m[m["type"].str.contains(course_type, case=False, regex=False)]
+        m = m[m["category"].str.contains(course_type, case=False, regex=False)]
     return {"status": "ok", "source": C.TIMETABLE_CSV.name, "count": int(len(m)),
             "courses": m[["course_code", "course_name"]].to_dict("records")}
 
@@ -110,6 +111,7 @@ def log_unanswered(question: str, reason: str) -> dict:
         question: The user's original question.
         reason: Short reason, e.g. 'out of scope' or 'no relevant context'.
     """
+    C.UNANSWERED_LOG.parent.mkdir(parents=True, exist_ok=True)
     new = not C.UNANSWERED_LOG.exists()
     with open(C.UNANSWERED_LOG, "a", newline="", encoding="utf-8") as f:
         w = csv.writer(f)

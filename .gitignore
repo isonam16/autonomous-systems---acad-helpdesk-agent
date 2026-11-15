@@ -1,2 +1,74 @@
-
+# Environments & Secrets
 .env
+.env*.local
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+venv/
+.venv/
+env/
+.env/
+auto/
+ENV/
+env.bak/
+venv.bak/
+
+# Local Vector Store & Embedded Data Caches
+data/chroma/
+data/embed_cache.json
+data/unanswered_questions.csv
+*.sqlite3
+
+# Google ADK sessions & runtime databases
+**/.adk/
+*.db
+
+# Model & Framework Caches
+.cache/
+hf_cache/
+
+# Evaluation outputs
+eval/results*.csv
+eval/ragas_results.csv
+results/
+
+# Deployment & Vercel
+.vercel/
+
+# OS specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE & Editor Settings
+.vscode/
+.idea/
+*.swp
+*.swo

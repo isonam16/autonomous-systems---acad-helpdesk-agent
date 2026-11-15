@@ -2,12 +2,14 @@ import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+# Vercel's filesystem is read-only except /tmp
+_DATA_OUT = Path("/tmp/helpdesk") if os.getenv("VERCEL") else ROOT / "data"
 DOCS_DIR = ROOT / "data" / "docs"
-TIMETABLE_CSV = ROOT / "data" / "timetable.csv"
-FACULTY_CSV = ROOT / "data" / "faculty.csv"
-CHROMA_DIR = ROOT / "data" / "chroma"
-CHUNKS_JSON = ROOT / "data" / "chunks.json"
-UNANSWERED_LOG = ROOT / "data" / "unanswered_questions.csv"
+TIMETABLE_CSV = DOCS_DIR / "csv" / "courses.csv"
+FACULTY_CSV = DOCS_DIR / "csv" / "faculty.csv"
+CHROMA_DIR = _DATA_OUT / "chroma"
+CHUNKS_JSON = _DATA_OUT / "chunks.json"
+UNANSWERED_LOG = _DATA_OUT / "unanswered_questions.csv"
 
 # Ollama
 OLLAMA_HOST = os.getenv("OLLAMA_API_BASE", "http://localhost:11434")
@@ -20,7 +22,7 @@ try:
 except ImportError:
     pass
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini").lower()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini/gemini-2.0-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini/gemini-3.5-flash")
 if LLM_PROVIDER == "gemini":
     _key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if not _key:
@@ -29,7 +31,10 @@ if LLM_PROVIDER == "gemini":
     LLM_MODEL = os.getenv("LLM_MODEL", GEMINI_MODEL)
 else:
     LLM_MODEL = os.getenv("LLM_MODEL", "ollama_chat/llama3.1:8b")
-EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
+EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
+
+# Max texts embedded per minute while indexing (Gemini free tier = 100; set higher if billed)
+EMBED_RPM = int(os.getenv("EMBED_RPM", "80"))
 
 # Retrieval
 CHUNK_CHARS = 900

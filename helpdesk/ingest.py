@@ -1,13 +1,14 @@
-"""Parse every file in data/docs, chunk it, embed with Ollama, store in ChromaDB.
+"""Parse every file in data/docs, chunk it, embed with BAAI/bge-small-en-v1.5, store in ChromaDB.
 
 Run once (and again whenever documents change):  python -m helpdesk.ingest
 """
+import csv
 import hashlib
+import os
 import json
 import re
 
 import chromadb
-import ollama
 from bs4 import BeautifulSoup
 from loguru import logger
 
@@ -18,15 +19,36 @@ except ImportError:  # older PyMuPDF
 
 from . import config as C
 
-_ollama = ollama.Client(host=C.OLLAMA_HOST)
-
 # noise found in the scraped iitj.ac.in pages
 _WEB_NOISE = "###147852369$$$_RedirectToLoginPage_%%%963258741!!!"
 _WEB_FOOTER = re.compile(r"Important links\s+CCCD @ IITJ.*", re.S)
 
+_model = None
 
-def embed(texts: list[str]) -> list[list[float]]:
-    return _ollama.embed(model=C.EMBED_MODEL, input=texts)["embeddings"]
+
+def _get_model():
+    global _model
+    if _model is None:
+        from fastembed import TextEmbedding
+        _model = TextEmbedding(model_name=C.EMBED_MODEL)  # BAAI/bge-small-en-v1.5, local ONNX
+    return _model
+
+
+def embed(texts: list[str], query: bool = False) -> list[list[float]]:
+    """Embed locally with BAAI/bge-small-en-v1.5 (no API, no rate limits)."""
+    m = _get_model()
+    it = m.query_embed(texts) if query else m.embed(texts)
+    return [v.tolist() for v in it]
+
+
+def ensure_ingested() -> None:
+    """Run ingestion only if the index is missing or built with another embed model."""
+    marker = C.CHROMA_DIR / "embed_model.txt"
+    if (C.CHUNKS_JSON.exists() and marker.exists()
+            and marker.read_text().strip() == C.EMBED_MODEL):
+        return
+    logger.info("Index missing/outdated - ingesting documents once at startup")
+    main()
 
 
 def _hard_split(p: str) -> list[str]:
@@ -85,6 +107,22 @@ def parse_file(path) -> list[dict]:
         raw = _WEB_FOOTER.sub("", raw.replace(_WEB_NOISE, " "))
         for piece in _split(raw):
             items.append({"text": piece, "source": path.name, "loc": loc})
+    elif suffix == ".csv":
+        # courses.csv / faculty.csv are queried by tools (tools.py), not embedded.
+        if path.name in {"courses.csv", "faculty.csv"}:
+            return items
+        with open(path, newline="", encoding="utf-8", errors="ignore") as f:
+            rows = [" | ".join(f"{k}: {v}" for k, v in r.items() if v) for r in csv.DictReader(f)]
+        cur = ""
+        for row in rows:
+            if cur and len(cur) + len(row) > C.CHUNK_CHARS:
+                items.append({"text": cur, "source": path.name, "loc": "csv rows"})
+                cur = ""
+            cur = (cur + "\n" + row).strip()
+        if cur:
+            items.append({"text": cur, "source": path.name, "loc": "csv rows"})
+    elif suffix == ".xlsx":
+        pass  # already exported to data/docs/csv/
     else:
         logger.warning(f"skipping unsupported file {path.name}")
     return items
@@ -103,7 +141,7 @@ def add_context(chunk: dict, doc_title: str) -> str:
 
 def main():
     chunks, seen_text, seen_files = [], set(), set()
-    files = [p for p in sorted(C.DOCS_DIR.iterdir()) if p.is_file() and not p.name.startswith(".")]
+    files = [p for p in sorted(C.DOCS_DIR.rglob("*")) if p.is_file() and not p.name.startswith(".")]
     for path in files:
         digest = hashlib.md5(path.read_bytes()).hexdigest()
         if digest in seen_files:
@@ -142,6 +180,8 @@ def main():
         )
         logger.debug(f"embedded {i + len(batch)}/{len(chunks)}")
 
+    C.CHROMA_DIR.mkdir(parents=True, exist_ok=True)
+    (C.CHROMA_DIR / "embed_model.txt").write_text(C.EMBED_MODEL)
     C.CHUNKS_JSON.write_text(json.dumps(chunks, ensure_ascii=False), encoding="utf-8")
     logger.info("ingestion done")
 

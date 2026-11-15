@@ -2,9 +2,10 @@
 """FastAPI backend with mounted Gradio frontend.
 
 Run from repository root:
-uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+uvicorn backend.main:app --host 0.0.0.0 --port 8000
 """
 
+import asyncio
 import uuid
 from typing import Optional
 
@@ -64,8 +65,14 @@ async def health():
     }
 
 
-@app.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest):
+@app.on_event("startup")
+async def _startup():
+    # chunk + embed docs only once (skipped if index already exists)
+    from helpdesk.ingest import ensure_ingested
+    await asyncio.to_thread(ensure_ingested)
+
+
+async def run_chat(req: ChatRequest) -> ChatResponse:
     if req.mode not in runners:
         raise HTTPException(
             status_code=400,
@@ -133,6 +140,11 @@ async def chat(req: ChatRequest):
         agent=agent,
         tools=tools,
     )
+
+
+@app.post("/chat", response_model=ChatResponse)
+async def chat(req: ChatRequest):
+    return await run_chat(req)
 
 
 # --------------------------------------------------
