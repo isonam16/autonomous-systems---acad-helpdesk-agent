@@ -1,13 +1,14 @@
 
 """Gradio frontend, mounted by the FastAPI backend."""
 
-import uuid
 import os
+import uuid
 
 import gradio as gr
 import requests
 
-API = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
+# Connect to FastAPI running in the same Render service.
+API = f"http://127.0.0.1:{os.getenv('PORT', '8000')}"
 
 
 def respond(message, history, mode, session_id):
@@ -21,6 +22,7 @@ def respond(message, history, mode, session_id):
                 "mode": mode,
             },
         )
+
         r.raise_for_status()
         d = r.json()
 
@@ -35,6 +37,7 @@ def respond(message, history, mode, session_id):
 
 
 with gr.Blocks(title="IIT Jodhpur Academic Helpdesk") as demo:
+
     gr.Markdown("# IIT Jodhpur Academic Helpdesk")
 
     mode = gr.Radio(
@@ -46,7 +49,6 @@ with gr.Blocks(title="IIT Jodhpur Academic Helpdesk") as demo:
     sid = gr.State(lambda: uuid.uuid4().hex)
 
     gr.ChatInterface(
-        respond,
+        fn=respond,
         additional_inputs=[mode, sid],
-        type="messages",
     )
