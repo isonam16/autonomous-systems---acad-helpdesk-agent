@@ -1,9 +1,17 @@
-"""FastAPI backend. Run from repo root: uvicorn backend.main:app --port 8000"""
+
+"""FastAPI backend with mounted Gradio frontend.
+
+Run from repository root:
+uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+"""
+
 import uuid
 from typing import Optional
 
+import gradio as gr
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
@@ -12,16 +20,26 @@ from helpdesk import config as C
 from helpdesk.agents import root_agent, single_agent
 
 
-
-import gradio as gr
-from gradio.routes import mount_gradio_app
-
 APP = "helpdesk_api"
+
+# FastAPI application
 app = FastAPI(title="Academic Helpdesk API")
+
+# Session service
 svc = InMemorySessionService()
+
+# Agent runners
 runners = {
-    "multi": Runner(agent=root_agent, app_name=APP, session_service=svc),
-    "single": Runner(agent=single_agent, app_name=APP, session_service=svc),
+    "multi": Runner(
+        agent=root_agent,
+        app_name=APP,
+        session_service=svc,
+    ),
+    "single": Runner(
+        agent=single_agent,
+        app_name=APP,
+        session_service=svc,
+    ),
 }
 
 
@@ -39,36 +57,92 @@ class ChatResponse(BaseModel):
 
 
 @app.get("/health")
-def health():
-    return {"status": "ok", "model": C.LLM_MODEL}
+async def health():
+    return {
+        "status": "ok",
+        "model": C.LLM_MODEL,
+    }
 
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
     if req.mode not in runners:
-        raise HTTPException(400, "mode must be 'multi' or 'single'")
-    sid = req.session_id or uuid.uuid4().hex
-    if not await svc.get_session(app_name=APP, user_id="web", session_id=sid):
-        await svc.create_session(app_name=APP, user_id="web", session_id=sid)
-    msg = types.Content(role="user", parts=[types.Part(text=req.message)])
-    answer, agent, tools = "", "", []
-    try:
-        async for ev in runners[req.mode].run_async(user_id="web", session_id=sid, new_message=msg):
-            tools += [fc.name for fc in ev.get_function_calls() or []]
-            if ev.is_final_response() and ev.content and ev.content.parts:
-                text = "".join(p.text or "" for p in ev.content.parts).strip()
-                if text:
-                    answer, agent = text, ev.author
-    except Exception as e:
-        raise HTTPException(500, str(e))
-    return ChatResponse(answer=answer, session_id=sid, agent=agent, tools=tools)
+        raise HTTPException(
+            status_code=400,
+            detail="mode must be 'multi' or 'single'",
+        )
 
+    sid = req.session_id or uuid.uuid4().hex
+
+    if not await svc.get_session(
+        app_name=APP,
+        user_id="web",
+        session_id=sid,
+    ):
+        await svc.create_session(
+            app_name=APP,
+            user_id="web",
+            session_id=sid,
+        )
+
+    msg = types.Content(
+        role="user",
+        parts=[types.Part(text=req.message)],
+    )
+
+    answer = ""
+    agent = ""
+    tools = []
+
+    try:
+        async for ev in runners[req.mode].run_async(
+            user_id="web",
+            session_id=sid,
+            new_message=msg,
+        ):
+            tools += [
+                fc.name
+                for fc in ev.get_function_calls() or []
+            ]
+
+            if (
+                ev.is_final_response()
+                and ev.content
+                and ev.content.parts
+            ):
+                text = "".join(
+                    p.text or ""
+                    for p in ev.content.parts
+                ).strip()
+
+                if text:
+                    answer = text
+                    agent = ev.author
+
+    except Exception as e:
+        import logging
+        logging.exception("Helpdesk request failed")
+        raise HTTPException(
+            status_code=500,
+            detail=str(e),
+        )
+
+    return ChatResponse(
+        answer=answer,
+        session_id=sid,
+        agent=agent,
+        tools=tools,
+    )
+
+
+# --------------------------------------------------
+# Mount Gradio frontend
+# --------------------------------------------------
 
 from frontend.app import demo
-# import gradio as gr
 
 app = gr.mount_gradio_app(
     app,
     demo,
-    path="/"
+    path="/",
 )
