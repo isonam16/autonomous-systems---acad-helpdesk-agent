@@ -1,17 +1,13 @@
 
-"""Gradio frontend, mounted inside the FastAPI application."""
+"""Gradio frontend, mounted by the FastAPI backend."""
 
-import os
 import uuid
+import os
 
 import gradio as gr
 import requests
 
-# On Render, use the same server's port.
-# Locally, default to the FastAPI development port 8000.
-API = os.getenv("BACKEND_URL") or (
-    f"http://127.0.0.1:{os.getenv('PORT', '8000')}"
-)
+API = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 
 
 def respond(message, history, mode, session_id):
