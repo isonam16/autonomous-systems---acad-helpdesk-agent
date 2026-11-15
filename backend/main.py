@@ -11,6 +11,11 @@ from google.genai import types
 from helpdesk import config as C
 from helpdesk.agents import root_agent, single_agent
 
+
+
+import gradio as gr
+from gradio.routes import mount_gradio_app
+
 APP = "helpdesk_api"
 app = FastAPI(title="Academic Helpdesk API")
 svc = InMemorySessionService()
