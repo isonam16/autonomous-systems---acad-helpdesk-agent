@@ -62,3 +62,13 @@ async def chat(req: ChatRequest):
     except Exception as e:
         raise HTTPException(500, str(e))
     return ChatResponse(answer=answer, session_id=sid, agent=agent, tools=tools)
+
+
+from frontend.app import demo
+# import gradio as gr
+
+app = gr.mount_gradio_app(
+    app,
+    demo,
+    path="/"
+)
